@@ -1,6 +1,8 @@
 import pickle
 import numpy as np
 import gzip
+# import time
+from tqdm import tqdm
 
 def one_hot(y, n_classes=10):
     return np.eye(n_classes)[y]
@@ -15,12 +17,11 @@ def load_mnist():
     train_data = np.array(train_inputs).reshape(-1, 784), np.array(train_results).reshape(-1, 10)
 
     val_inputs = [np.reshape(x, (784, 1)) for x in val_data[0]]
-    val_results = [one_hot(y, 10) for y in val_data[1]]
-    val_data = np.array(val_inputs).reshape(-1, 784), np.array(val_results).reshape(-1, 10)
+    val_results = [one_hot(y, 10) for y in val_data[1]] 
+    val_data = np.array(val_inputs).reshape(-1, 784), np.array(val_results).reshape(-1, 10) 
 
-    test_inputs = [np.reshape(x, (784, 1)) for x in test_data[0]]
-    test_data = list(zip(test_inputs, test_data[1]))
-
+    test_inputs = [np.reshape(x, (784, 1)) for x in test_data[0]] 
+    test_data = list(zip(test_inputs, test_data[1])) 
     return train_data, val_data, test_data
 
 # train_data_, val_data_, test_data_ = load_mnist()
@@ -32,6 +33,7 @@ class NN(object):
                  lr=7e-4,
                  batch_size=64,
                  seed=None,
+                 init_method='glorot',
                  activation="relu",
                  data=None
                  ):
@@ -68,41 +70,53 @@ class NN(object):
         for layer_n in range(1, self.n_hidden + 2):
             # WRITE CODE HERE
             self.weights[f"b{layer_n}"] = np.zeros((1, all_dims[layer_n]))
+            if self.init_method == "zeros":
+                self.weights[f"W{layer_n}"] = np.zeros((all_dims[layer_n - 1], all_dims[layer_n]))
+            elif self.init_method == "normal":
+                # Normal
+                self.weights[f"W{layer_n}"] = np.random.normal(size=(all_dims[layer_n - 1], all_dims[layer_n]))
+            elif self.init_method == "glorot":
+                # Glorot
+                d = np.sqrt(6.0/(all_dims[layer_n-1] + all_dims[layer_n]))
+                self.weights[f"W{layer_n}"] = np.random.uniform(low=-d, high=d,size=(all_dims[layer_n - 1], all_dims[layer_n]))
+            else:
+                raise Exception("invalid")
 
     def relu(self, x, grad=False):
+        val = x*(x>0)
         if grad:
             # WRITE CODE HERE
-            pass
+            return 1.0*(x>0)
         # WRITE CODE HERE
-        pass
-        return 0
+        return val
 
     def sigmoid(self, x, grad=False):
+        val = 1.0/(1.0+np.exp(-x))
         if grad:
             # WRITE CODE HERE
-            pass
+            return val*(1.0-val) 
         # WRITE CODE HERE
-        pass
-        return 0
+        return val
 
     def tanh(self, x, grad=False):
+        exp = np.exp(2*x)
+        val = (exp-1.0)/(exp+1.0)
         if grad:
             # WRITE CODE HERE
-            pass
+            return (1.0+val)(1.0-val)
         # WRITE CODE HERE
-        pass
-        return 0
+        return val
 
     def activation(self, x, grad=False):
         if self.activation_str == "relu":
             # WRITE CODE HERE
-            pass
+            return self.relu(x, grad)
         elif self.activation_str == "sigmoid":
             # WRITE CODE HERE
-            pass
+            return self.sigmoid(x, grad)
         elif self.activation_str == "tanh":
             # WRITE CODE HERE
-            pass
+            return self.tanh(x, grad)
         else:
             raise Exception("invalid")
         return 0
@@ -110,29 +124,55 @@ class NN(object):
     def softmax(self, x):
         # Remember that softmax(x-C) = softmax(x) when C is a constant.
         # WRITE CODE HERE
-        pass
-        return 0
+        if len(x.shape) == 1:
+            exp = np.exp(x-max(x))
+            return exp/np.sum(exp)
+
+        exps =  np.exp(x-np.max(x,1).reshape(-1,1))
+        return exps/np.sum(exps,1).reshape(-1,1)
+
+    def forward_inp(self, x,weights):
+        cache = {"Z0": x}
+        # cache is a dictionnary with keys Z0, A0, ..., Zm, Am where m - 1 is the number of hidden layers
+        # Ai corresponds to the preactivation at layer i, Zi corresponds to the activation at layer i
+        # WRITE CODE HERE
+        for layer_n in range(1, self.n_hidden + 2):
+            #import ipdb; ipdb.set_trace()
+            cache[f"A{layer_n}"] = np.matmul(cache[f"Z{layer_n-1}"],weights[f"W{layer_n}"]) + weights[f"b{layer_n}"]
+            cache[f"Z{layer_n}"] = self.activation(cache[f"A{layer_n}"]) 
+        cache[f"Z{self.n_hidden + 1}"] = self.softmax(cache[f"A{self.n_hidden + 1}"])
+        return cache
 
     def forward(self, x):
         cache = {"Z0": x}
         # cache is a dictionnary with keys Z0, A0, ..., Zm, Am where m - 1 is the number of hidden layers
         # Ai corresponds to the preactivation at layer i, Zi corresponds to the activation at layer i
         # WRITE CODE HERE
-        pass
+        for layer_n in range(1, self.n_hidden + 2):
+            #import ipdb; ipdb.set_trace()
+            cache[f"A{layer_n}"] = np.matmul(cache[f"Z{layer_n-1}"],self.weights[f"W{layer_n}"]) + self.weights[f"b{layer_n}"]
+            cache[f"Z{layer_n}"] = self.activation(cache[f"A{layer_n}"]) 
+        cache[f"Z{self.n_hidden + 1}"] = self.softmax(cache[f"A{self.n_hidden + 1}"])
         return cache
 
     def backward(self, cache, labels):
-        output = cache[f"Z{self.n_hidden + 1}"]
         grads = {}
         # grads is a dictionnary with keys dAm, dWm, dbm, dZ(m-1), dA(m-1), ..., dW1, db1
         # WRITE CODE HERE
-        pass
+        grads[f"dA{self.n_hidden+1}"] = -(labels - cache[f"Z{self.n_hidden + 1}"])
+        for layer_n in range(self.n_hidden+1, 0, -1):
+            grads[f"dW{layer_n}"] = np.matmul(cache[f"Z{layer_n-1}"].T,grads[f"dA{layer_n}"])
+            grads[f"db{layer_n}"] = np.sum(grads[f"dA{layer_n}"],0).reshape(1,-1)
+            if layer_n > 1:
+                grads[f"dZ{layer_n-1}"] = np.matmul(grads[f"dA{layer_n}"],self.weights[f"W{layer_n}"].T)
+                grads[f"dA{layer_n-1}"] = grads[f"dZ{layer_n-1}"]*self.activation(cache[f"A{layer_n-1}"], grad=True)
         return grads
 
     def update(self, grads):
-        for layer in range(1, self.n_hidden + 2):
+        for layer_n in range(1, self.n_hidden + 2):
             # WRITE CODE HERE
-            pass
+            self.weights[f"W{layer_n}"] -= self.lr * grads[f"dW{layer_n}"]/self.batch_size
+            self.weights[f"b{layer_n}"] -= self.lr * grads[f"db{layer_n}"]/self.batch_size
 
     # def one_hot(self, y, n_classes=None):
     #     n_classes = n_classes or self.n_classes
@@ -142,9 +182,16 @@ class NN(object):
         prediction[np.where(prediction < self.epsilon)] = self.epsilon
         prediction[np.where(prediction > 1 - self.epsilon)] = 1 - self.epsilon
         # WRITE CODE HERE
-        pass
-        return 0
+        return np.sum(-np.log(prediction[labels == 1.]))/prediction.shape[0]
 
+    def compute_loss_and_accuracy_inp(self, X, y, weights):
+        one_y = y
+        y = np.argmax(y, axis=1)  # Change y to integers
+        cache = self.forward_inp(X,weights)
+        predictions = np.argmax(cache[f"Z{self.n_hidden + 1}"], axis=1)
+        accuracy = np.mean(y == predictions)
+        loss = self.loss(cache[f"Z{self.n_hidden + 1}"], one_y)
+        return loss, accuracy, predictions
     def compute_loss_and_accuracy(self, X, y):
         one_y = y
         y = np.argmax(y, axis=1)  # Change y to integers
@@ -154,30 +201,50 @@ class NN(object):
         loss = self.loss(cache[f"Z{self.n_hidden + 1}"], one_y)
         return loss, accuracy, predictions
 
+    def num_grad(self, i, N):
+        epsilon = 1.0/N
+        X_train, y_train = self.train
+        X_ = X_train[0:1]
+        y_ = y_train[0:1]
+        from copy import deepcopy
+        w1 = deepcopy(self.weights)
+        w2 = deepcopy(self.weights)
+        #import ipdb; ipdb.set_trace()
+        w1['W2'][0,i] += epsilon
+        w2['W2'][0,i] -= epsilon
+        l1, _, _ = self.compute_loss_and_accuracy_inp(X_, y_,w1)
+        l2, _, _ = self.compute_loss_and_accuracy_inp(X_, y_,w2)
+        delta = (l1 - l2)/(2*epsilon)
+        cache = self.forward(X_)
+        grads = self.backward(cache, y_)
+        return np.abs(grads['dW2'][0,i] - delta)
+
+
+
     def train_loop(self, n_epochs):
         X_train, y_train = self.train
         y_onehot = y_train
         dims = [X_train.shape[1], y_onehot.shape[1]]
         self.initialize_weights(dims)
-
         n_batches = int(np.ceil(X_train.shape[0] / self.batch_size))
-
-        for epoch in range(n_epochs):
-            for batch in range(n_batches):
+        for _ in range(n_epochs):
+            for batch in tqdm(range(n_batches)):
                 minibatchX = X_train[self.batch_size * batch:self.batch_size * (batch + 1), :]
                 minibatchY = y_onehot[self.batch_size * batch:self.batch_size * (batch + 1), :]
                 # WRITE CODE HERE
-                pass
-
+                cache = self.forward(minibatchX)
+                grads = self.backward(cache, minibatchY)
+                self.update(grads)
+            
             X_train, y_train = self.train
             train_loss, train_accuracy, _ = self.compute_loss_and_accuracy(X_train, y_train)
             X_valid, y_valid = self.valid
             valid_loss, valid_accuracy, _ = self.compute_loss_and_accuracy(X_valid, y_valid)
-
             self.train_logs['train_accuracy'].append(train_accuracy)
             self.train_logs['validation_accuracy'].append(valid_accuracy)
             self.train_logs['train_loss'].append(train_loss)
             self.train_logs['validation_loss'].append(valid_loss)
+            print("Training Accuracy {}, Validation Accuracy {}, Training Loss {}, Validation Loss {}".format(train_accuracy, valid_accuracy, train_loss, valid_loss))
 
         return self.train_logs
 

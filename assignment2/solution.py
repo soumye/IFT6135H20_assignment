@@ -353,10 +353,11 @@ class GRU(nn.Module): # Implement a stacked GRU RNN
             for layer in range(self.num_layers):
                 # Calculate the hidden states
                 # And apply the activation function tanh on it
-                r_t = torch.sigmoid(self.r[layer](torch.cat([input_, hidden[layer]], 1)))
-                z_t = torch.sigmoid(self.z[layer](torch.cat([input_, hidden[layer]], 1)))
-                h_t = torch.tanh(self.h[layer](torch.cat([input_, r_t*hidden[layer]], 1)))
-                hidden[layer] = (1-z_t)*hidden[layer] + z_t*h_t
+                clone = hidden[layer].clone()
+                r_t = torch.sigmoid(self.r[layer](torch.cat([input_, clone], 1)))
+                z_t = torch.sigmoid(self.z[layer](torch.cat([input_, clone], 1)))
+                h_t = torch.tanh(self.h[layer](torch.cat([input_, r_t*clone], 1)))
+                hidden[layer] = (1-z_t)*clone + z_t*h_t
 
                 # Apply dropout on this layer, but not for the recurrent units
                 input_ = self.dropout(hidden[layer])

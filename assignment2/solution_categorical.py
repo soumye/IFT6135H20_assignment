@@ -4,8 +4,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math, copy, time
 from torch.autograd import Variable
+from torch.distributions.categorical import Categorical
 
-
+#import matplotlib.pyplot as plt
+""
 # NOTE ==============================================
 #
 # Fill in code for every method which has a TODO
@@ -147,6 +149,7 @@ class RNN(nn.Module):
 
         # For each time step
         for timestep in range(self.seq_len):
+            hidden_states = []
             # Apply dropout on the embedding result
             input_ = self.dropout(embed_out[timestep])
             # For each layer
@@ -154,11 +157,16 @@ class RNN(nn.Module):
                 # Calculate the hidden states
                 # And apply the activation function tanh on it
                 hidden[layer] = torch.tanh(self.layers[layer](torch.cat([input_, hidden[layer]], 1)))
+                hidden_states.append(hidden[layer])
                 # Apply dropout on this layer, but not for the recurrent units
                 input_ = self.dropout(hidden[layer])
             # Store the output of the time step
             logits[timestep] = self.out_layer(input_)
-
+            hidden_p = torch.stack(hidden_states)
+         
+        #print(hidden)
+        
+        print(hidden_p.shape)
         return logits, hidden
 
     # Problem 4.2
@@ -183,34 +191,101 @@ class RNN(nn.Module):
             - Sampled sequences of tokens
                         shape: (generated_seq_len, batch_size)
         """
+        # TODO ========================
         if inputs.is_cuda:
             device = inputs.get_device()
         else:
             device = torch.device("cpu")
+        #print(inputs.shape)
+        #print(generated_seq_len)
+        #print(inputs)
+        #print(seq)
+        # Apply the Embedding layer on the input
+        print("Entering method")
+        inputs = inputs.unsqueeze(0)
+       # print(inputs.shape)
+        #samples = torch.zeros(self.batch_size, generated_seq_len)
 
-        embed_out = self.embeddings(inputs.unsqueeze(0))
+        # for i, s in enumerate(input):
+        #     samples[i][0] = s
+
+        #samples = samples.to(device)
+
+        embed_out = self.embeddings(inputs)# shape (seq_len,batch_size,emb_size)
+       # print(embed_out.shape)
+        # Create a tensor to store outputs during the Forward
         logits = torch.zeros(self.seq_len,self.batch_size, self.vocab_size).to(device)
-
+        #print(logits.shape)
+        # sampled_tokens = torch.LongTensor().cuda()
+        # sampled_tokens = sampled_tokens.unsqueeze(1)
+        # For each time step
+        samples = inputs
         for timestep in range(generated_seq_len):
-            input_ = embed_out[0]
-            for layer in range(self.num_layers):
-                hidden[layer] = torch.tanh(self.layers[layer](torch.cat([input_, hidden[layer]], 1)))
-                input_ = self.dropout(hidden[layer])
-            logits[timestep] = self.out_layer(input_)
-            _,indices = torch.max(logits[timestep],dim=-1)
-
-            if(timestep==0):
-                sampled_tokens = indices.unsqueeze(0)
+            # Apply dropout on the embedding result
+            if timestep ==0:
+                input_ = embed_out[0]
             else:
-                sampled_tokens = torch.cat((sampled_tokens,indices.unsqueeze(0)),dim=1)
-            embed_out = self.embeddings(indices.unsqueeze(0))
-        samples = sampled_tokens.view(generated_seq_len,self.batch_size)
-        return samples
+                input_ = embed_out[0]
+
+            print(embed_out.shape)
+            print(input_.shape)
+            # For each layer
+            for layer in range(self.num_layers):
+                # Calculate the hidden states
+                # And apply the activation function tanh on it
+               # print(input_.shape)
+                #print(hidden[layer].shape)
+                hidden[layer] = torch.tanh(self.layers[layer](torch.cat([input_, hidden[layer]], 1)))
+                # Apply dropout on this layer, but not for the recurrent units
+                input_ = self.dropout(hidden[layer])
+            # Store the output of the time step
+            logits[timestep] = self.out_layer(input_)
+            #print(logits.shape)
+           # token_probabilities = F.softmax(logits[timestep],dim=-1)
+            #outp = F.softmax(logits[timestep]/10, dim=-1)
+            #next_inp = torch.multinomial(outp, num_samples=1).squeeze()
+            outp = F.softmax(logits[timestep], dim=-1)
+            #outp[:,1] = 0
+            token_out = Categorical(probs=outp).sample()   # (batch_size)
+            next_inp = token_out.view(1, -1)    
+            print(next_inp.shape) 
+            print(samples.shape)          # (1, batch_size
+            samples = torch.cat((samples,next_inp),dim=1)
+            #samples.append(next_inp.unsqueeze(0))
+            input_ = next_inp
+
+
+
+            # prediction = F.softmax(logits[timestep],dim=-1)
+            # word_samples = torch.distributions.Categorical(prediction).sample()
+            # print("Working")
+            # samples = samples.to("cpu")
+            # for i, s in enumerate(word_samples):
+            #     samples[i][t + 1] = s
+            # samples = samples.to(device)
+            #token,indices = torch.max(logits[timestep],dim=-1)
+            #print(indices.shape)
+            #indices = indices.unsqueeze(0)
+           # print(indices.shape)
+            # if(timestep==0):
+            #     sampled_tokens = indices
+            # else:
+            #     sampled_tokens = torch.cat((sampled_tokens,indices),dim=1)
+           # print(sampled_tokens.shape)
+            embed_out = self.embeddings(input_)
+            #print(embed_out.shape)
+            #print("Over")#print(len(samples[0][0]))
+        #sampled_tokens =  torch.stack(samples)
+        #print(sampled_tokens)
+        #print(sampled_tokens.shape)
+        sampled_tokens = samples
+        return sampled_tokens.view(generated_seq_len+1,self.batch_size)
+
+       
 
 
 # Problem 1
 class GRU(nn.Module): # Implement a stacked GRU RNN
-
     """A stacked gated recurrent unit (GRU) RNN.
 
     Follow the same template as the RNN (above), but use the equations for
@@ -242,29 +317,25 @@ class GRU(nn.Module): # Implement a stacked GRU RNN
 
         self.word_embeddings = nn.Embedding(self.vocab_size,self.emb_size)
 
-        # # Create "reset gate" layers
+        # Create "reset gate" layers
         self.r = nn.ModuleList()
-        # The first layer
         self.r.append(nn.Linear(emb_size + hidden_size, hidden_size))
-        # The hidden r
+        # The hidden layers
         self.r.extend(clones(nn.Linear(2*hidden_size, hidden_size), num_layers-1))
 
-        # # Create "forget gate" layers
+        # Create "forget gate" layers
         self.z = nn.ModuleList()
-        # The first layer
         self.z.append(nn.Linear(emb_size + hidden_size, hidden_size))
-        # The hidden layers
         self.z.extend(clones(nn.Linear(2*hidden_size, hidden_size), num_layers-1))
 
-        # # Create the "memory content" layers
+        # Create the "memory content" layers
         self.h = nn.ModuleList()
-        # The first layer
         self.h.append(nn.Linear(emb_size + hidden_size, hidden_size))
         # The hidden layers
         self.h.extend(clones(nn.Linear(2*hidden_size, hidden_size), num_layers-1))
 
         # Dropout
-        self.dropout = nn.Dropout(1 - self.dp_keep_prob)
+        self.dropout = nn.Dropout(1 - self.dp_keep_prob,inplace=False)
 
         # The output layer
         self.out_layer = nn.Linear(hidden_size, vocab_size)
@@ -276,43 +347,41 @@ class GRU(nn.Module): # Implement a stacked GRU RNN
         self.init_out_layer_weights_uniform()
 
     def init_embedding_weights_uniform(self, init_range=0.1):
-        # TODO ========================
         nn.init.uniform_(self.word_embeddings.weight, -init_range, init_range)
+        # TODO ========================
 
     def init_reset_gate_weights_uniform(self):
-        # TODO ========================
-        # For every layer
+        k = np.sqrt(1.0/self.hidden_size)
         for i in range(self.num_layers):
             # Initialize the weights and biases uniformly
-            b = 1/math.sqrt(self.hidden_size)
-            nn.init.uniform_(self.r[i].weight, -b, b)
-            nn.init.uniform_(self.r[i].bias, -b, b)
+            k = 1/math.sqrt(self.hidden_size)
+            nn.init.uniform_(self.r[i].weight, -k, k)
+            nn.init.uniform_(self.r[i].bias, -k, k)
+        
+        
+        # TODO ========================
 
     def init_forget_gate_weights_uniform(self):
-        # TODO ========================
-        # For every layer
-        for i in range(self.num_layers):
+          for i in range(self.num_layers):
             # Initialize the weights and biases uniformly
-            b = 1/math.sqrt(self.hidden_size)
-            nn.init.uniform_(self.z[i].weight, -b, b)
-            nn.init.uniform_(self.z[i].bias, -b, b)
-
+            k = 1/math.sqrt(self.hidden_size)
+            nn.init.uniform_(self.z[i].weight, -k, k)
+            nn.init.uniform_(self.z[i].bias, -k, k)
+        
+        # TODO ========================
 
     def init_memory_weights_uniform(self):
-        # TODO ========================
-        # For every layer
-        for i in range(self.num_layers):
+         for i in range(self.num_layers):
             # Initialize the weights and biases uniformly
-            b = 1/math.sqrt(self.hidden_size)
-            nn.init.uniform_(self.h[i].weight, -b, b)
-            nn.init.uniform_(self.h[i].bias, -b, b)
+            k = 1/math.sqrt(self.hidden_size)
+            nn.init.uniform_(self.h[i].weight, -k, k)
+            nn.init.uniform_(self.h[i].bias, -k, k)
+        # TODO ========================
 
     def init_out_layer_weights_uniform(self):
-        # TODO ========================
-        # Initialize output layer weights uniformly in the range [-0.1, 0.1]
-        # And all the biases to 0
         nn.init.uniform_(self.out_layer.weight, -0.1, 0.1)
         nn.init.zeros_(self.out_layer.bias)
+        # TODO ========================
 
     def init_hidden(self):
         """
@@ -368,23 +437,56 @@ class GRU(nn.Module): # Implement a stacked GRU RNN
 
         # For each time step
         for timestep in range(self.seq_len):
-            # Apply dropout on the embedding result
-            input_ = self.dropout(embed_out[timestep])
-            # For each layer
+            #print(timestep)
+            hidden_states = []
+            # # Apply dropout on the embedding result
+            ip = self.dropout(embed_out[timestep])
+            # reset_val = torch.sigmoid(self.r[0](torch.cat([ip, hidden[0]], 1)))
+            # forget_val = torch.sigmoid(self.r[0](torch.cat([ip, hidden[0]], 1)))
+            # h_tilde = torch.tanh(self.h[0](torch.cat((ip, reset_val[0]*hidden[0]), dim=1)))
+            # #print(h_tilde.shape)
+            # #print(self.h[layer].shape)
+            # hidden[0] = (1 - forget_val)*hidden[0] + forget_val*h_tilde
+            # #print(hidden[layer])
+            # # Apply dropout on this layer, but not for the recurrent units
+
+            # ip2 = hidden[0].clone()
+            # layer=1
+            # reset_val = torch.sigmoid(self.r[layer-1](torch.cat([ip2, hidden[layer]], 1)))
+            # forget_val = torch.sigmoid(self.r[layer-1](torch.cat([ip2, hidden[layer]], 1)))
+            # h_tilde = torch.tanh(self.h[layer-1](torch.cat((ip2, reset_val*hidden[layer]), dim=1)))
+            # #print(h_tilde.shape)
+            # #print(self.h[layer].shape)
+            # hidden[1] =  forget_val*h_tilde
+            # #print(hidden[layer])
+            # # Apply dropout on this layer, but not for the recurrent units
+
+            # ip3 = hidden[1].clone()
+            #print(hidden.shape)
+            #print(self.num_layers)
+            #For each layer
             for layer in range(self.num_layers):
                 # Calculate the hidden states
                 # And apply the activation function tanh on it
-                clone = hidden[layer].clone()
-                r_t = torch.sigmoid(self.r[layer](torch.cat([input_, clone], 1)))
-                z_t = torch.sigmoid(self.z[layer](torch.cat([input_, clone], 1)))
-                h_t = torch.tanh(self.h[layer](torch.cat([input_, r_t*clone], 1)))
-                hidden[layer] = (1-z_t)*clone + z_t*h_t
-
+                #print(layer)s
+               # print(layer)
+                reset_val = torch.sigmoid(self.r[layer](torch.cat([ip, hidden[layer]], 1)))
+                forget_val = torch.sigmoid(self.z[layer](torch.cat([ip, hidden[layer]], 1)))
+                h_tilde = torch.tanh(self.h[layer](torch.cat((ip, reset_val*hidden[layer]),1)))
+                #print(h_tilde.shape)
+                #print(self.h[layer].shape)
+                h_t = (1 - forget_val)*hidden[layer] + forget_val*h_tilde
+                #print(hidden[layer])
                 # Apply dropout on this layer, but not for the recurrent units
-                input_ = self.dropout(hidden[layer])
-            # Store the output of the time step
-            logits[timestep] = self.out_layer(input_)
 
+                ip = self.dropout(h_t)
+                hidden_states.append(h_t)
+            # Store the output of the time step
+            
+            logits[timestep] = self.out_layer(ip)
+        
+            hidden = torch.stack(hidden_states)
+        
         return logits, hidden
 
     def generate(self, input, hidden, generated_seq_len):
@@ -419,35 +521,117 @@ class GRU(nn.Module): # Implement a stacked GRU RNN
 
         # Create a tensor to store outputs during the Forward
         logits = torch.zeros(self.seq_len, self.batch_size, self.vocab_size).to(device)
-
+        samples = inputs
+       
+            
         # For each time step
         for timestep in range(self.seq_len):
-            # Apply dropout on the embedding result
-            input_ = embed_out[0]
-            # For each layer
+            #print(timestep)
+            hidden_states = []
+            # # Apply dropout on the embedding result
+            ip = embed_out[0]
+            if timestep ==0:
+                ip = embed_out[0]
+            else:
+                ip = embed_out[0]
+
+            # reset_val = torch.sigmoid(self.r[0](torch.cat([ip, hidden[0]], 1)))
+            # forget_val = torch.sigmoid(self.r[0](torch.cat([ip, hidden[0]], 1)))
+            # h_tilde = torch.tanh(self.h[0](torch.cat((ip, reset_val[0]*hidden[0]), dim=1)))
+            # #print(h_tilde.shape)
+            # #print(self.h[layer].shape)
+            # hidden[0] = (1 - forget_val)*hidden[0] + forget_val*h_tilde
+            # #print(hidden[layer])
+            # # Apply dropout on this layer, but not for the recurrent units
+
+            # ip2 = hidden[0].clone()
+            # layer=1
+            # reset_val = torch.sigmoid(self.r[layer-1](torch.cat([ip2, hidden[layer]], 1)))
+            # forget_val = torch.sigmoid(self.r[layer-1](torch.cat([ip2, hidden[layer]], 1)))
+            # h_tilde = torch.tanh(self.h[layer-1](torch.cat((ip2, reset_val*hidden[layer]), dim=1)))
+            # #print(h_tilde.shape)
+            # #print(self.h[layer].shape)
+            # hidden[1] =  forget_val*h_tilde
+            # #print(hidden[layer])
+            # # Apply dropout on this layer, but not for the recurrent units
+
+            # ip3 = hidden[1].clone()
+            #print(hidden.shape)
+            #print(self.num_layers)
+            #For each layer
+            #print(ip.shape)
             for layer in range(self.num_layers):
                 # Calculate the hidden states
                 # And apply the activation function tanh on it
-                clone = hidden[layer].clone()
-                r_t = torch.sigmoid(self.r[layer](torch.cat([input_, clone], 1)))
-                z_t = torch.sigmoid(self.z[layer](torch.cat([input_, clone], 1)))
-                h_t = torch.tanh(self.h[layer](torch.cat([input_, r_t*clone], 1)))
-                hidden[layer] = (1-z_t)*clone + z_t*h_t
-
+                #print(layer)s
+               # print(layer)
+                reset_val = torch.sigmoid(self.r[layer](torch.cat([ip, hidden[layer]], 1)))
+                forget_val = torch.sigmoid(self.z[layer](torch.cat([ip, hidden[layer]], 1)))
+                h_tilde = torch.tanh(self.h[layer](torch.cat((ip, reset_val*hidden[layer]),1)))
+                #print(h_tilde.shape)
+                #print(self.h[layer].shape)
+                h_t = (1 - forget_val)*hidden[layer] + forget_val*h_tilde
+                #print(hidden[layer])
                 # Apply dropout on this layer, but not for the recurrent units
-                input_ = self.dropout(hidden[layer])
-            # Store the output of the time step
-            logits[timestep] = self.out_layer(input_)
 
-            _,indices = torch.max(logits[timestep],dim=-1)
-            indices = indices.unsqueeze(0)
-            if(timestep==0):
-                sampled_tokens = indices
-            else:
-                sampled_tokens = torch.cat((sampled_tokens,indices),dim=1)
-            embed_out = self.word_embeddings(indices)
-        samples = sampled_tokens.view(generated_seq_len,self.batch_size)
-        return samples
+                ip = self.dropout(h_t)
+                hidden_states.append(h_t)
+            # Store the output of the time step
+            
+            logits[timestep] = self.out_layer(ip)
+        
+            hidden = torch.stack(hidden_states)
+            outp = F.softmax(logits[timestep], dim=-1)
+            outp[:,1] = 0
+            token_out = Categorical(probs=outp).sample()   # (batch_size)
+            next_inp = token_out.view(1, -1)               # (1, batch_size
+            #next_inp = torch.multinomial(outp, num_samples=1).squeeze()
+            #print(next_inp.shape)
+            samples = torch.cat((samples,next_inp),dim=1)
+            #samples.append(next_inp.unsqueeze(0))
+            input_ = next_inp
+
+
+
+            # prediction = F.softmax(logits[timestep],dim=-1)
+            # word_samples = torch.distributions.Categorical(prediction).sample()
+            # print("Working")
+            # samples = samples.to("cpu")
+            # for i, s in enumerate(word_samples):
+            #     samples[i][t + 1] = s
+            # samples = samples.to(device)
+            #token,indices = torch.max(logits[timestep],dim=-1)
+            #print(indices.shape)
+            #indices = indices.unsqueeze(0)
+           # print(indices.shape)
+            # if(timestep==0):
+            #     sampled_tokens = indices
+            # else:
+            #     sampled_tokens = torch.cat((sampled_tokens,indices),dim=1)
+           # print(sampled_tokens.shape)
+            embed_out = self.word_embeddings(input_)
+            #print(embed_out.shape)
+            #print("Over")#print(len(samples[0][0]))
+        #sampled_tokens =  torch.stack(samples)
+        #print(sampled_tokens)
+        #print(sampled_tokens.shape)
+        sampled_tokens = samples
+        return sampled_tokens.view(generated_seq_len+1,self.batch_size)
+
+
+        #     token,indices = torch.max(logits[timestep],dim=-1)
+        #     #print(indices.shape)
+        #     indices = indices.unsqueeze(0)
+        #    # print(indices.shape)
+        #     if(timestep==0):
+        #         sampled_tokens = indices
+        #     else:
+        #         sampled_tokens = torch.cat((sampled_tokens,indices),dim=1)
+        #    # print(sampled_tokens.shape)
+        #     embed_out = self.word_embeddings(indices)
+        
+        # return sampled_tokens.view(generated_seq_len,self.batch_size)
+        
 
 
 # Problem 2
@@ -455,7 +639,7 @@ class GRU(nn.Module): # Implement a stacked GRU RNN
 #
 # Code for the Transformer model
 #
-##############################################################################
+# #############################################################################
 
 """
 Implement the MultiHeadedAttention module of the transformer architecture.
@@ -527,57 +711,64 @@ class MultiHeadedAttention(nn.Module):
         self.n_units = n_units
         self.n_heads = n_heads
         # TODO ========================
-        # Create the layers below. self.linears should contain 3 linear
+        # Create the layers below. self.linear should contain n_head linear
         # layers that compute the projection from n_units => n_heads x d_k
-        # (one for each of query, key and value) plus an additional final layer
-        # (4 in total)
 
         # Note: that parameters are initialized with Glorot initialization in
         # the make_model function below (so you don't need to implement this
         # yourself).
 
         # Note: the only Pytorch modules you are allowed to use are nn.Linear
-        # and nn.Dropout. You can also use softmax, masked_fill and the "clones"
+        # and nn.Dropout. You can also use softmax, masked fill and the "clones"
         # function we provide.
-        self.linears = nn.ModuleList()
-        self.linears.append(nn.Linear(n_units, self.n_heads*self.d_k))
-        self.linears.append(nn.Linear(n_units, self.n_heads*self.d_k))
-        self.linears.append(nn.Linear(n_units, self.n_heads*self.d_k))
-        self.linears.append(nn.Linear(self.n_heads*self.d_k,n_units))
-        self.dropout = nn.Dropout(dropout)
+       
+        self.linears = clones(nn.Linear(n_units,n_units),4)
+        #print(self.linears)
+        self.dropout = nn.Dropout(p=dropout)
+
+  
 
     def attention(self, query, key, value, mask=None, dropout=None):
         # Implement scaled dot product attention
-        # The query, key, and value inputs will be of size
-        # batch_size x n_heads x seq_len x d_k
-        # (If making a single call to attention in your forward method)
-        # and mask (if not None) will be of size
-        # batch_size x 1 x seq_len x seq_len
-
-        # As described in the .tex, apply input masking to the softmax
-        # generating the "attention values" (i.e. A_i in the .tex)
-
-        # Also apply dropout to the attention values.
         # This method needs to compare query and keys first, then mask positions
         # if a mask is provided, normalize the scores, apply dropout and then
         # retrieve values, in this particular order.
-        # When applying the mask, use values -1e9 for the masked positions.
+        # When initializing the mask, use values 1e-9 for the masked positions.
         # The method returns the result of the attention operation as well as
         # the normalized scores after dropout.
-
+        # B is the batch size, T is the sequence length, d_value is the size
+        # of the key.value features
         # TODO ========================
-        scores = torch.einsum("ijkl,ijml->ijkm",query,key)/np.sqrt(self.d_k)
+        
+        # print(key.shape)
+        # print(query.shape)
+        #print(self.linears[2](key).shape)
+        # print(query.shape)
+        # print(key.rtranspose(2,1).shape)
+        # print(self.d_k)
+        
+        # print(key.size(-1))
+       # print(key.values)
+   
+        scores = torch.matmul(query,key.transpose(-1,-2))/math.sqrt(key.size(-1))
+        #print(scores.shape)
         if mask is not None:
-            if len(mask.size()) == 3 and len(query.size()) == 4:
-                mask.unsqueeze(1)
-            scores = scores.masked_fill(mask==0, -1e9)
-        norm_scores = F.softmax(scores,dim=3)
+            #print(mask.shape)
+            #mask = mask.unsqueeze(1)
+            
+            scores = scores.masked_fill(mask==0,-1e-9)
+        norm_scores = F.softmax(scores,dim=-1)
+        # print(norm_scores.shape)
+        #print(norm_scores)
         if dropout is not None:
-            # Tensor of shape batch_size x n_heads x seq_len x seq_len
-            norm_scores = dropout(norm_scores)
-        # Tensor of shape batch_size x n_heads x seq_len x d_k
-        output = torch.einsum('ijkl,ijlm->ijkm',norm_scores, value)
+
+            norm_scores =  self.dropout(norm_scores)# Tensor of shape B x T x T
+        
+        output =  torch.matmul(norm_scores,value) # Tensor of shape B x T x d_value
+       # print(output.shape)    
+       # print("OVer")
         return output, norm_scores
+       # return output.transpose(1,2).reshape(query.size(0), -1, self.n_units), norm_scores.reshape(query.size(0),35,35,-1)
 
 
     def forward(self, query, key, value, mask=None):
@@ -585,25 +776,47 @@ class MultiHeadedAttention(nn.Module):
         # query, key, and value correspond to Q, K, and V in the latex, and
         # they all have size: (batch_size, seq_len, self.n_units)
         # mask has size: (batch_size, seq_len, seq_len)
-        # This method should call the attention method above
-        if mask is not None:
-            # Same mask applied to all n_heads heads.
-            mask = mask.unsqueeze(1)
+        # As described in the .tex, apply input masking to the softmax
+        # generating the "attention values" (i.e. A_i in the .tex)
+        # Also apply dropout to the attention values.
         # TODO ========================
-        # 1) Do all the linear projections in batch from n_units => n_heads x d_k
-        bsz, seq_len, _ = query.shape
-        query = self.linears[0](query).reshape(bsz, seq_len, self.n_heads, self.d_k).transpose_(1,2)
-        key = self.linears[1](key).reshape(bsz, seq_len, self.n_heads, self.d_k).transpose_(1,2)
-        value = self.linears[2](value).reshape(bsz, seq_len, self.n_heads, self.d_k).transpose_(1,2)
-
-        # 2) Apply attention on all the projected vectors in batch.
-        # The query, key, value inputs to the attention method will be of size
-        # batch_size x n_heads x seq_len x d_k
-        output, _ = self.attention(query, key, value, mask, self.dropout)
-
-        # 3) "Concat" using a view and apply a final linear.
+        
+            
+        batch_size = query.size(0)
+ 
+        #print(key.shape)
+        query = self.linears[0](query)
+        key = self.linears[1](key)
+        value = self.linears[2](value)
+        key = key.view(batch_size,-1,self.n_heads, self.d_k)
+        query = query.view(batch_size, -1, self.n_heads, self.d_k)
+        value = value.view(batch_size, -1, self.n_heads, self.d_k)
+       
+        key = key.transpose(1,2)
+        query = query.transpose(1,2)
+        value = value.transpose(1,2)
+        print(key.shape)
+        if mask is not None:
+            #print(mask.shape)
+            #mask = mask.unsqueeze(1)
+            mask = mask.unsqueeze(1)
+        output,norm = self.attention(query, key,value, mask, self.dropout)
+        print(output.shape)
+        #print(scores)
+        #output = output.
+        print("Output")
+        print(output.shape)
+        print(norm.shape)
+        #print(scores.shape)
+        output = output.transpose(1, 2).reshape(batch_size, -1, self.n_heads * self.d_k)
+        output = self.linears[3](output)
+        #print(output.shape)
+        #print(self.n_units)
+        return output
         # size: (batch_size, seq_len, self.n_units)
-        return self.linears[3](output.transpose(1,2).contiguous().view(bsz,seq_len,-1))
+
+
+
 
 
 

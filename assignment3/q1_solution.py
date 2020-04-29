@@ -5,6 +5,7 @@ Template for Question 1 of hwk3.
 import math
 import numpy as np
 import torch
+from torch.distributions.multivariate_normal import MultivariateNormal
 
 
 def log_likelihood_bernoulli(mu, target):
@@ -23,7 +24,7 @@ def log_likelihood_bernoulli(mu, target):
     target = target.view(batch_size, -1)
 
     # log_likelihood_bernoulli
-    return
+    return (target*torch.log(mu) + (1-target)*torch.log(1-mu)).sum(1)
 
 
 def log_likelihood_normal(mu, logvar, z):
@@ -43,8 +44,8 @@ def log_likelihood_normal(mu, logvar, z):
     logvar = logvar.view(batch_size, -1)
     z = z.view(batch_size, -1)
 
-    # log normal
-    return
+    # log normaltorch
+    return -0.5*(((z-mu)**2)*(1/torch.exp(logvar)) + logvar + np.log(2*np.pi)).sum(1)
 
 
 def log_mean_exp(y):
@@ -59,9 +60,9 @@ def log_mean_exp(y):
     # init
     batch_size = y.size(0)
     sample_size = y.size(1)
-
+    a = y.max(1).values
     # log_mean_exp
-    return
+    return torch.log((torch.exp(y.t() - a).sum(0))/sample_size) + a
 
 
 def kl_gaussian_gaussian_analytic(mu_q, logvar_q, mu_p, logvar_p):
@@ -84,7 +85,7 @@ def kl_gaussian_gaussian_analytic(mu_q, logvar_q, mu_p, logvar_p):
     logvar_p = logvar_p.view(batch_size, -1)
 
     # kld
-    return
+    return 0.5*(((mu_p-mu_q)**2)*(1/torch.exp(logvar_p)) + logvar_p - logvar_q + torch.exp(logvar_q - logvar_p) - 1).sum(1)
 
 
 def kl_gaussian_gaussian_mc(mu_q, logvar_q, mu_p, logvar_p, num_samples=1):
@@ -107,6 +108,8 @@ def kl_gaussian_gaussian_mc(mu_q, logvar_q, mu_p, logvar_p, num_samples=1):
     logvar_q = logvar_q.view(batch_size, -1).unsqueeze(1).expand(batch_size, num_samples, input_size)
     mu_p = mu_p.view(batch_size, -1).unsqueeze(1).expand(batch_size, num_samples, input_size)
     logvar_p = logvar_p.view(batch_size, -1).unsqueeze(1).expand(batch_size, num_samples, input_size)
-
-    # kld
-    return
+    dist_q = MultivariateNormal(mu_q, torch.diag_embed(torch.exp(logvar_q)))
+    dist_p = MultivariateNormal(mu_p, torch.diag_embed(torch.exp(logvar_p)))
+    z = dist_q.sample()
+    kld = (dist_q.log_prob(z) - dist_p.log_prob(z)).sum(1)/num_samples
+    return kld

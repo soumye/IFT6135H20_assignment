@@ -48,10 +48,10 @@ def vf_wasserstein_distance(x, y, critic):
     return (critic(x) - critic(y)).mean()
 
 def g_helinger(v):
-    return 1 - torch.exp(-v)
+    return 1.0 - torch.exp(-v)
 
 def fenchel_helinger(t):
-    return t/(1-t)
+    return t/(1.0-t)
     
 def vf_squared_hellinger(x, y, critic):
     """
@@ -72,10 +72,9 @@ def Hellinger(theta):
     model = q2_model.Critic(2)
     optim = torch.optim.SGD(model.parameters(), lr=1e-3)
     sampler1 = iter(q2_sampler.distribution1(0, 512))
-    theta = 0
     sampler2 = iter(q2_sampler.distribution1(theta, 512))
     lambda_reg_lp = 50 # Recommended hyper parameters for the lipschitz regularizer.
-    steps = 150
+    steps = 500
     for step in range(steps):
         data1 = torch.from_numpy(next(sampler1)).float()
         data2 = torch.from_numpy(next(sampler2)).float()
@@ -93,14 +92,13 @@ def Wasserstein(theta):
     model = q2_model.Critic(2)
     optim = torch.optim.SGD(model.parameters(), lr=1e-3)
     sampler1 = iter(q2_sampler.distribution1(0, 512))
-    theta = 0
     sampler2 = iter(q2_sampler.distribution1(theta, 512))
     lambda_reg_lp = 50 # Recommended hyper parameters for the lipschitz regularizer.
-    steps = 150
+    steps = 50
     for step in range(steps):
         data1 = torch.from_numpy(next(sampler1)).float()
         data2 = torch.from_numpy(next(sampler2)).float()
-        loss = -vf_wasserstein_distance(data1, data2, model) + lambda_reg_lp*lp_reg(data1, data2, model)
+        loss = vf_wasserstein_distance(data1, data2, model) + lambda_reg_lp*lp_reg(data1, data2, model)
         print('Step {} : loss {}'.format(step, loss))
         optim.zero_grad()
         loss.backward()
@@ -110,14 +108,11 @@ def Wasserstein(theta):
     return vf_wasserstein_distance(data1, data2, model)    
 
 if __name__ == '__main__':
-    X = np.arange(0,2,0.1)
-    Y = [Hellinger(x) for x in X]
-    plt.plot(X,Y)
-    plt.title('Square Hellinger Distance')
-    plt.xlabel('theta')
-    plt.ylabel('Distance')
-    plt.show()
+    torch.manual_seed(911)
+    np.random.seed(10)
     
+
+
     X = np.arange(0,2,0.1)
     Y = [Wasserstein(x) for x in X]
     plt.plot(X,Y)
@@ -125,4 +120,3 @@ if __name__ == '__main__':
     plt.xlabel('theta')
     plt.ylabel('Distance')
     plt.show()
-    

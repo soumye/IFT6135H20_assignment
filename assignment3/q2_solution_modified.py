@@ -6,7 +6,8 @@ import torch
 import math
 import q2_sampler
 import q2_model
-
+import numpy as np
+from matplotlib import pyplot as plt
 
 def lp_reg(x, y, critic, device='cpu'):
     """
@@ -22,35 +23,35 @@ def lp_reg(x, y, critic, device='cpu'):
     :param critic: (Module) - torch module that you want to regularize.
     :return: (FloatTensor) - shape: (1,) - Lipschitz penalty
     """
-    # sampler = iter(q2_sampler.distribution1(0, x.size(0)))
-    # data = next(sampler)
-    # t = torch.tensor(data[:, 1], dtype=torch.float32).unsqueeze(1)
-
-    # x_hat = t*x + (1-t)*y
-    # x_hat.requires_grad = True
-    # fx_hat = critic(x_hat)
-    # fx_hat.backward(torch.ones_like(fx_hat))
-
-    # grads = torch.autograd.grad(fx_hat, x_hat, grad_outputs=torch.ones_like(x_hat), create_graph=True)
-
-    # norm_grad = torch.norm(grads, dim=1, p=2)
-    # zero = torch.Tensor([0.])
-
-    # lp = torch.max(zero, norm_grad - 1).pow(2)
-
     sampler = iter(q2_sampler.distribution1(0, x.size(0)))
     data = next(sampler)
-    t = torch.tensor(data[:, 1], requires_grad=True, dtype=torch.float32, device=device).view(-1, 1, 1, 1)
+    t = torch.tensor(data[:, 1], dtype=torch.float32).unsqueeze(1)
 
     x_hat = t*x + (1-t)*y
+    x_hat.requires_grad = True
     fx_hat = critic(x_hat)
+    fx_hat.backward(torch.ones_like(fx_hat))
 
-    grads = torch.autograd.grad(fx_hat, x_hat, grad_outputs=torch.ones_like(fx_hat), create_graph=True)[0]
+    grads = torch.autograd.grad(fx_hat, x_hat, grad_outputs=torch.ones_like(x_hat), create_graph=True)
 
     norm_grad = torch.norm(grads, dim=1, p=2)
-    zero = torch.Tensor([0.]).to(device)
+    zero = torch.Tensor([0.])
 
     lp = torch.max(zero, norm_grad - 1).pow(2)
+
+    # sampler = iter(q2_sampler.distribution1(0, x.size(0)))
+    # data = next(sampler)
+    # t = torch.tensor(data[:, 1], requires_grad=True, dtype=torch.float32, device=device).view(-1, 1, 1, 1)
+
+    # x_hat = t*x + (1-t)*y
+    # fx_hat = critic(x_hat)
+
+    # grads = torch.autograd.grad(fx_hat, x_hat, grad_outputs=torch.ones_like(fx_hat), create_graph=True)[0]
+
+    # norm_grad = torch.norm(grads, dim=1, p=2)
+    # zero = torch.Tensor([0.]).to(device)
+
+    # lp = torch.max(zero, norm_grad - 1).pow(2)
 
     return lp.mean()
 
@@ -100,7 +101,7 @@ def vf_squared_hellinger(x, y, critic):
     return torch.unsqueeze(obj, dim=0)
 
 
-if __name__ == '__main__':
+def Hellinger(theta):
     # Example of usage of the code provided for answering Q2.5 as well as recommended hyper parameters.
     model = q2_model.Critic(2)
     optim = torch.optim.SGD(model.parameters(), lr=1e-3)
@@ -108,3 +109,53 @@ if __name__ == '__main__':
     theta = 0
     sampler2 = iter(q2_sampler.distribution1(theta, 512))
     lambda_reg_lp = 50 # Recommended hyper parameters for the lipschitz regularizer.
+    steps = 150
+    for step in range(steps):
+        data1 = torch.from_numpy(next(sampler1)).float()
+        data2 = torch.from_numpy(next(sampler2)).float()
+        loss = -vf_squared_hellinger(data1, data2, model)
+        print('Step {} : loss {}'.format(step, loss))
+        optim.zero_grad()
+        loss.backward()
+        optim.step()
+    data1 = torch.from_numpy(next(sampler1)).float()
+    data2 = torch.from_numpy(next(sampler2)).float()
+    return vf_squared_hellinger(data1, data2, model)
+
+def Wasserstein(theta):
+    # Example of usage of the code provided for answering Q2.5 as well as recommended hyper parameters.
+    model = q2_model.Critic(2)
+    optim = torch.optim.SGD(model.parameters(), lr=1e-3)
+    sampler1 = iter(q2_sampler.distribution1(0, 512))
+    theta = 0
+    sampler2 = iter(q2_sampler.distribution1(theta, 512))
+    lambda_reg_lp = 50 # Recommended hyper parameters for the lipschitz regularizer.
+    steps = 150
+    for step in range(steps):
+        data1 = torch.from_numpy(next(sampler1)).float()
+        data2 = torch.from_numpy(next(sampler2)).float()
+        loss = -vf_wasserstein_distance(data1, data2, model) + lambda_reg_lp*lp_reg(data1, data2, model)
+        print('Step {} : loss {}'.format(step, loss))
+        optim.zero_grad()
+        loss.backward()
+        optim.step()
+    data1 = torch.from_numpy(next(sampler1)).float()
+    data2 = torch.from_numpy(next(sampler2)).float()
+    return vf_wasserstein_distance(data1, data2, model)    
+
+if __name__ == '__main__':
+    # X = np.arange(0,2,0.1)
+    # Y = [Hellinger(x) for x in X]
+    # plt.plot(X,Y)
+    # plt.title('Square Hellinger Distance')
+    # plt.xlabel('theta')
+    # plt.ylabel('Distance')
+    # plt.show()
+    
+    X = np.arange(0,2,0.1)
+    Y = [Wasserstein(x) for x in X]
+    plt.plot(X,Y)
+    plt.title('Wasserstein Distance')
+    plt.xlabel('theta')
+    plt.ylabel('Distance')
+    plt.show()
